@@ -42,7 +42,6 @@ import {
 import { CurrentUser } from "src/core/auth/decorators/current-user.decorator";
 import { AuthUser } from "src/core/auth/strategies/interfaces/auth-strategy.interface";
 import { BadRequestException } from "@nestjs/common";
-import { ConfigService } from "@nestjs/config";
 
 /**
  * Default MIME type allowlist used when FILE_ALLOWED_MIME_TYPES is not set.
@@ -94,6 +93,26 @@ const DEFAULT_ALLOWED_MIME_TYPES = [
   "application/x-bzip2",
 ];
 
+/**
+ * Resolves the MIME type allowlist from the FILE_ALLOWED_MIME_TYPES env var.
+ * Falls back to the default list when unset or empty.
+ *
+ * Defined at module level (not on the controller) because it is called from
+ * the FileInterceptor fileFilter, which is evaluated in the decorator
+ * expression where `this` is not the controller instance.
+ */
+function resolveAllowedMimeTypes(): Set<string> {
+  const raw = process.env.FILE_ALLOWED_MIME_TYPES;
+  if (!raw) {
+    return new Set(DEFAULT_ALLOWED_MIME_TYPES);
+  }
+  const parsed = raw
+    .split(",")
+    .map((t) => t.trim().toLowerCase())
+    .filter(Boolean);
+  return parsed.length > 0 ? new Set(parsed) : new Set(DEFAULT_ALLOWED_MIME_TYPES);
+}
+
 @ApiTags("Files")
 @ApiBearerAuth()
 @Controller("files")
@@ -105,24 +124,7 @@ export class FileUploadController {
     private readonly cleanupService: FileCleanupService,
     private readonly scanService: FileScanService,
     private readonly metadataService: FileMetadataService,
-    private readonly configService: ConfigService,
   ) {}
-
-  /**
-   * Resolves the MIME type allowlist from FILE_ALLOWED_MIME_TYPES env var.
-   * Falls back to the default list when unset or empty.
-   */
-  private getAllowedMimeTypes(): Set<string> {
-    const raw = this.configService.get<string>("FILE_ALLOWED_MIME_TYPES");
-    if (!raw) {
-      return new Set(DEFAULT_ALLOWED_MIME_TYPES);
-    }
-    const parsed = raw
-      .split(",")
-      .map((t) => t.trim().toLowerCase())
-      .filter(Boolean);
-    return parsed.length > 0 ? new Set(parsed) : new Set(DEFAULT_ALLOWED_MIME_TYPES);
-  }
 
   // ── Upload ────────────────────────────────────────────────────────
 
@@ -139,7 +141,7 @@ export class FileUploadController {
           cb(new BadRequestException("No file provided"), false);
           return;
         }
-        const allowed = this.getAllowedMimeTypes();
+        const allowed = resolveAllowedMimeTypes();
         if (allowed.has(f.mimetype)) {
           cb(null, true);
         } else {
